@@ -1,19 +1,22 @@
 provider "aws" {
-  region = "us-east-1"
+  region = "us-west-2"
 }
 
 resource "aws_s3_bucket" "secure_bucket" {
   bucket = "chadderw-s3-temp"
-  
-  # Bucket versioning is required for GxP, SOX, HIPAA compliant accounts
-  versioning {
-    enabled = true
-  }
 
   # Tags for resource identification
   tags = {
     Name        = "SecureBucket"
     Environment = "Production"
+  }
+}
+
+# Bucket versioning is required for GxP, SOX, HIPAA compliant accounts
+resource "aws_s3_bucket_versioning" "secure_bucket_versioning" {
+  bucket = aws_s3_bucket.secure_bucket.id
+  versioning_configuration {
+    status = "Enabled"
   }
 }
 
