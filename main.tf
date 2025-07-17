@@ -1,6 +1,6 @@
 
 provider "aws" {
-  region = "us-west-2"
+  region = "us-east-2"
 }
 
 resource "aws_s3_bucket" "secure_bucket" {
