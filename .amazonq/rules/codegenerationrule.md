@@ -1,0 +1,1 @@
+You will always use confluence to check for security guidelines before creating terraform template for AWS resources. You will create terraform template if the user specifies of creating any AWS resources. You don't need to run Checkov security scan on the templates. 
