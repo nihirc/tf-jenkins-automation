@@ -2,6 +2,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
+from flask_cors import CORS
 import subprocess
 import os
 import time
@@ -13,6 +14,22 @@ import queue
 import json
 
 app = Flask(__name__)
+# Configure CORS with specific settings
+CORS(app, resources={r"/*": {"origins": "*", "allow_headers": ["Content-Type", "Authorization"], "methods": ["GET", "POST", "OPTIONS"]}}, supports_credentials=True)
+
+# Add CORS headers to all responses
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    return response
+
+# Handle OPTIONS requests (preflight requests)
+@app.route('/', methods=['OPTIONS'])
+def handle_options():
+    return '', 204
 
 # Global variables for Q CLI process management
 q_process = None
@@ -50,7 +67,6 @@ def read_output(process, q, stop_event):
 
             try:
                 char = q_stdout.get_nowait()
-                print(char)
                 chunk_buffer += char
                 buffer += char
                 last_char_time = time.time()
@@ -99,8 +115,6 @@ def initialize_q_cli():
         bufsize=0
     )
 
-    print(q_process)
-
     # Start a thread to read the output
     reader_thread = threading.Thread(
         target=read_output,
@@ -113,7 +127,6 @@ def initialize_q_cli():
     try:
         # Give some time for the initial output to appear
         time.sleep(3)
-        print("starting the initialization")
 
         # Collect initial chunks until we get a complete message or timeout
         initial_output = ""
@@ -123,7 +136,7 @@ def initialize_q_cli():
         while time.time() - start_time < timeout:
             try:
                 response_data = response_queue.get(timeout=0.5)
-                print(response_data)
+
                 if isinstance(response_data, dict):
                     if response_data.get("type") == "chunk":
                         initial_output += response_data.get("data", "")
@@ -198,25 +211,19 @@ atexit.register(cleanup_q_process)
 # Also handle SIGTERM for container environments
 signal.signal(signal.SIGTERM, lambda signum, frame: cleanup_q_process())
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    return send_from_directory('.', 'jj_agentic_ai_poc.html')
-
-@app.route('/api/query', methods=['POST', 'GET'])
-def query():
     print("I am here")
+    # If it's a GET request, serve the HTML file
+    if request.method == 'GET':
+        return send_from_directory('.', 'jj_agentic_ai_poc.html')
+
+    # If it's a POST request, process the query
     global q_process, q_initialized
 
-    # Handle both GET (for SSE) and POST requests
-    if request.method == 'GET':
-        user_query = request.args.get('query', '')
-        print("Get", user_query)
-        streaming = True  # GET requests are always streaming
-    else:  # POST
-        data = request.json
-        user_query = data.get('query', '')
-        print(user_query)
-        streaming = data.get('streaming', True)  # Default to streaming mode
+    data = request.json
+    user_query = data.get('query', '')
+    print(user_query)
 
     if not user_query:
         return jsonify({'response': 'Empty query received'}), 400
@@ -224,6 +231,7 @@ def query():
     try:
         # Initialize Q CLI if not already done
         if not q_initialized:
+            print("no initialized")
             initialize_q_cli()
 
         # Check if process is still alive and restart if needed
@@ -232,79 +240,52 @@ def query():
             q_initialized = False
             initialize_q_cli()
 
-        # Send the query to the persistent Q CLI session
+        # Clear the queue before sending a new query
+        while not response_queue.empty():
+            response_queue.get_nowait()
         print("Sending query to q")
+        # Send the query to the persistent Q CLI session
         send_query_to_q(user_query)
-        streaming=False
-        if streaming:
-            # Use streaming response
-            def generate():
-                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
-                while True:
-                    try:
-                        response_data = response_queue.get(timeout=60)
 
-                        if isinstance(response_data, dict):
-                            response_type = response_data.get("type")
-                            chunk = response_data.get("data", "")
+        # Use traditional non-streaming response
+        response = ""
+        start_time = time.time()
+        timeout = 10
 
-                            if response_type == "chunk" and chunk:
-                                # Clean ANSI escape sequences and send chunk
-                                clean_chunk = ansi_escape.sub('', chunk)
-                                if clean_chunk:  # Only send non-empty chunks
-                                    yield f"data: {json.dumps({'chunk': clean_chunk})}\n\n"
-                            elif response_type == "complete":
-                                # Complete response received
-                                clean_response = ansi_escape.sub('', chunk)
-                                yield f"data: {json.dumps({'complete': clean_response.strip()})}\n\n"
-                                break
-                        else:
-                            # Legacy format (just a string)
-                            clean_response = ansi_escape.sub('', response_data)
-                            yield f"data: {json.dumps({'complete': clean_response.strip()})}\n\n"
-                            break
-
-                    except queue.Empty:
-                        yield f"data: {json.dumps({'error': 'Request timed out'})}\n\n"
-                        break
-
-            return Response(stream_with_context(generate()), mimetype='text/event-stream')
-        else:
-            # Use traditional non-streaming response
+        # Collect all chunks until timeout or complete message
+        while time.time() - start_time < timeout:
             try:
-                response = None
-                start_time = time.time()
-                timeout = 60
+                response_data = response_queue.get(timeout=1)
 
-                while time.time() - start_time < timeout:
-                    try:
-                        response_data = response_queue.get(timeout=1)
+                if isinstance(response_data, dict):
+                    if response_data.get("type") == "chunk":
+                        response += response_data.get("data", "")
+                    elif response_data.get("type") == "complete":
+                        response = response_data.get("data", "")
+                        break
+                else:
+                    # Legacy format
+                    response = response_data
+                    break
 
-                        if isinstance(response_data, dict) and response_data.get("type") == "complete":
-                            response = response_data.get("data", "")
-                            break
-                        elif isinstance(response_data, str):
-                            response = response_data
-                            break
+            except queue.Empty:
+                # If we have some response but no more data is coming, consider it complete
+                if response:
+                    break
+                continue
 
-                    except queue.Empty:
-                        continue
+        if not response:
+            return jsonify({'response': 'No response received. Please try again.'}), 408
 
-                if response is None:
-                    return jsonify({'response': 'Request timed out'}), 408
+        # Clean ANSI escape sequences
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        clean_response = ansi_escape.sub('', response)
 
-                # Clean ANSI escape sequences
-                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-                clean_response = ansi_escape.sub('', response)
-
-                return jsonify({'response': clean_response.strip()})
-
-            except Exception as e:
-                return jsonify({'response': f'Error: {str(e)}'}), 500
+        return jsonify({'response': clean_response.strip()})
 
     except Exception as e:
-        return jsonify({'response': f"Server error: {str(e)}"}), 500
+        return jsonify({'response': f'Error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     try:

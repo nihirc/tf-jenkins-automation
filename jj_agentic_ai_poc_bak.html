@@ -310,7 +310,7 @@
             chatHistory.scrollTop = chatHistory.scrollHeight;
         }
 
-        // Function to send a message to the Q CLI with streaming
+        // Function to send a message to the Q CLI with POST request
         async function sendMessage() {
             const message = userInput.value.trim();
             if (!message) return;
@@ -340,37 +340,32 @@
             chatHistory.scrollTop = chatHistory.scrollHeight;
 
             try {
-                // Use Server-Sent Events for streaming
-                const eventSource = new EventSource(`/api/query?query=${encodeURIComponent(message)}`);
+                // Use fetch with POST request
+                // Get the current URL's origin or use the load balancer URL in production
+                const apiUrl = window.location.origin;
+                console.log('Sending request to:', apiUrl);
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: message,
+                        streaming: false
+                    }),
+                    credentials: 'same-origin'
+                });
 
-                let responseText = '';
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
 
-                eventSource.onmessage = function(event) {
-                    const data = JSON.parse(event.data);
+                const data = await response.json();
+                updateStreamingMessage(content, data.response);
 
-                    if (data.chunk) {
-                        // Append the chunk to the response
-                        responseText += data.chunk;
-                        updateStreamingMessage(content, responseText);
-                    } else if (data.complete) {
-                        // Complete response received
-                        responseText = data.complete;
-                        updateStreamingMessage(content, responseText);
-                        eventSource.close();
-                    } else if (data.error) {
-                        // Error occurred
-                        content.innerHTML = `<p>Error: ${data.error}</p>`;
-                        eventSource.close();
-                    }
-                };
-
-                eventSource.onerror = function() {
-                    content.innerHTML = '<p>Connection error. Please try again.</p>';
-                    eventSource.close();
-                };
             } catch (error) {
                 console.error('Error:', error);
-                content.innerHTML = '<p>Sorry, there was an error processing your request. Please try again later.</p>';
+                content.innerHTML = `<p>Sorry, there was an error processing your request: ${error.message}</p>`;
             }
         }
 
