@@ -3,11 +3,14 @@ provider "aws" {
 }
 
 resource "aws_s3_bucket" "demo_bucket" {
-  bucket = "mypocdemo21stjuly"
+  bucket = "pocdemo21stjuly1"
 
-  # Prevent accidental deletion of this S3 bucket
-  lifecycle {
-    prevent_destroy = true
+  # Force destroy is set to false for safety
+  force_destroy = false
+
+  tags = {
+    Environment = "POC"
+    CreatedDate = "2025-07-21"
   }
 }
 
@@ -30,7 +33,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
   }
 }
 
-# Block all public access
+# Block public access
 resource "aws_s3_bucket_public_access_block" "public_access_block" {
   bucket = aws_s3_bucket.demo_bucket.id
 
@@ -38,30 +41,4 @@ resource "aws_s3_bucket_public_access_block" "public_access_block" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-# Enable encryption in transit
-resource "aws_s3_bucket_policy" "secure_transport" {
-  bucket = aws_s3_bucket.demo_bucket.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "EnforceSecureTransport"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.demo_bucket.arn,
-          "${aws_s3_bucket.demo_bucket.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
 }
