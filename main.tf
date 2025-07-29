@@ -1,7 +1,17 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"  # Updated to match the available version
+    }
+  }
+}
+
 provider "aws" {
   region = "us-east-1"  # You can modify this to your desired region
 }
 
+# S3 bucket and related resources
 resource "aws_s3_bucket" "poc_bucket" {
   bucket = "julypoctoday"
 }
