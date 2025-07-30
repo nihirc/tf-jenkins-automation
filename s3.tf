@@ -1,9 +1,9 @@
 provider "aws" {
-  region = "us-east-1"  # Update this to your desired region
+  region = var.aws_region
 }
 
 resource "aws_s3_bucket" "poc_bucket" {
-  bucket = "pocdemo30july"
+  bucket = var.bucket_name
 
   # Prevent accidental deletion of this S3 bucket
   lifecycle {
