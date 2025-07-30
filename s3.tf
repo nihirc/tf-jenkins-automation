@@ -4,11 +4,6 @@ provider "aws" {
 
 resource "aws_s3_bucket" "poc_bucket" {
   bucket = var.bucket_name
-
-  # Prevent accidental deletion of this S3 bucket
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 # Enable versioning
